@@ -56,7 +56,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const row = toProfileRow(body);
+  const { id, ...rest } = body;
+  const row = toProfileRow(rest);
   const { data, error } = await supabase.from("profiles").insert(row).select().single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(mapProfileRow(data), { status: 201 });
