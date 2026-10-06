@@ -6,31 +6,6 @@ import { projects as seedProjects } from "@/data/projects";
 
 export type Screen = "select-profile" | "create-user" | "home" | "project-detail";
 
-const LS_PROFILES = "ps5:profiles";
-const LS_PROJECTS = "ps5:projects";
-
-function loadProfiles(): Profile[] {
-  if (typeof window === "undefined") return [...seedProfiles];
-  try {
-    const raw = localStorage.getItem(LS_PROFILES);
-    if (raw) return JSON.parse(raw) as Profile[];
-  } catch {}
-  return [...seedProfiles];
-}
-function loadProjects(): Project[] {
-  if (typeof window === "undefined") return [...seedProjects];
-  try {
-    const raw = localStorage.getItem(LS_PROJECTS);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Project[];
-      // dedupe by id
-      const seen = new Set<string>();
-      return parsed.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
-    }
-  } catch {}
-  return [...seedProjects];
-}
-
 interface SystemState {
   screen: Screen;
   profiles: Profile[];
@@ -39,79 +14,128 @@ interface SystemState {
   selectedProject: Project | null;
   goCreateUser: () => void;
   selectUser: (user: Profile) => void;
-  createUser: (user: Profile) => void;
-  updateUser: (id: string, patch: Partial<Profile>) => void;
-  deleteUser: (id: string) => void;
+  createUser: (user: Profile) => Promise<void>;
+  updateUser: (id: string, patch: Partial<Profile>) => Promise<void>;
+  deleteUser: (id: string) => Promise<void>;
   goHome: () => void;
   selectProject: (project: Project) => void;
   goBack: () => void;
   logout: () => void;
-  // projects CRUD
-  createProject: (p: Project) => void;
-  updateProject: (id: string, patch: Partial<Project>) => void;
-  deleteProject: (id: string) => void;
-  hydrate: () => void;
+  createProject: (p: Project) => Promise<void>;
+  updateProject: (id: string, patch: Partial<Project>) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
+  hydrate: () => Promise<void>;
 }
 
-export const useSystemStore = create<SystemState>((set) => ({
+export const useSystemStore = create<SystemState>((set, get) => ({
   screen: "select-profile",
   profiles: [...seedProfiles],
   projects: [...seedProjects],
   activeUser: null,
   selectedProject: null,
-  hydrate: () =>
-    set({ profiles: loadProfiles(), projects: loadProjects() }),
+
+  hydrate: async () => {
+    try {
+      const [profilesRes, projectsRes] = await Promise.all([
+        fetch("/api/profiles"),
+        fetch("/api/projects"),
+      ]);
+      const profiles = profilesRes.ok ? await profilesRes.json() : [...seedProfiles];
+      const projects = projectsRes.ok ? await projectsRes.json() : [...seedProjects];
+      set({ profiles, projects });
+    } catch {
+      set({ profiles: [...seedProfiles], projects: [...seedProjects] });
+    }
+  },
+
   goCreateUser: () => set({ screen: "create-user" }),
   selectUser: (user) => set({ activeUser: user, screen: "home" }),
-  createUser: (user) =>
-    set((s) => {
-      const next = [...s.profiles, user];
-      try { localStorage.setItem(LS_PROFILES, JSON.stringify(next)); } catch {}
-      return { profiles: next, activeUser: user, screen: "home" };
-    }),
-  updateUser: (id, patch) =>
-    set((s) => {
-      const next = s.profiles.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p));
-      try { localStorage.setItem(LS_PROFILES, JSON.stringify(next)); } catch {}
-      const active = s.activeUser?.id === id ? { ...s.activeUser, ...patch } as Profile : s.activeUser;
-      return { profiles: next, activeUser: active };
-    }),
-  deleteUser: (id) =>
-    set((s) => {
-      const next = s.profiles.filter((p) => p.id !== id);
-      try { localStorage.setItem(LS_PROFILES, JSON.stringify(next)); } catch {}
-      // delete projects of that user
-      const nextProjects = s.projects.filter((pr) => pr.profileId !== id);
-      try { localStorage.setItem(LS_PROJECTS, JSON.stringify(nextProjects)); } catch {}
-      const isActive = s.activeUser?.id === id;
-      return {
-        profiles: next,
-        projects: nextProjects,
-        activeUser: isActive ? null : s.activeUser,
-        screen: isActive ? "select-profile" : s.screen,
-      };
-    }),
   goHome: () => set({ screen: "home" }),
   selectProject: (project) => set({ selectedProject: project, screen: "project-detail" }),
   goBack: () => set({ screen: "home" }),
   logout: () => set({ screen: "select-profile", activeUser: null, selectedProject: null }),
-  createProject: (p) =>
-    set((s) => {
-      if (s.projects.some((x) => x.id === p.id)) return s;
-      const next = [...s.projects, p];
-      try { localStorage.setItem(LS_PROJECTS, JSON.stringify(next)); } catch {}
-      return { projects: next };
-    }),
-  updateProject: (id, patch) =>
-    set((s) => {
-      const next = s.projects.map((pr) => (pr.id === id ? { ...pr, ...patch, updatedAt: new Date().toISOString() } : pr));
-      try { localStorage.setItem(LS_PROJECTS, JSON.stringify(next)); } catch {}
-      return { projects: next, selectedProject: s.selectedProject?.id === id ? { ...s.selectedProject, ...patch } as Project : s.selectedProject };
-    }),
-  deleteProject: (id) =>
-    set((s) => {
-      const next = s.projects.filter((pr) => pr.id !== id);
-      try { localStorage.setItem(LS_PROJECTS, JSON.stringify(next)); } catch {}
-      return { projects: next, selectedProject: s.selectedProject?.id === id ? null : s.selectedProject, screen: s.selectedProject?.id === id ? "home" : s.screen };
-    }),
+
+  createUser: async (user) => {
+    const res = await fetch("/api/profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(user),
+    });
+    if (res.ok) {
+      const saved = await res.json();
+      set((s) => ({ profiles: [...s.profiles, saved], activeUser: saved, screen: "home" }));
+    }
+  },
+
+  updateUser: async (id, patch) => {
+    const res = await fetch("/api/profiles", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...patch, id }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      set((s) => ({
+        profiles: s.profiles.map((p) => (p.id === id ? updated : p)),
+        activeUser: s.activeUser?.id === id ? updated : s.activeUser,
+      }));
+    }
+  },
+
+  deleteUser: async (id) => {
+    const res = await fetch("/api/profiles", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    if (res.ok) {
+      set((s) => {
+        const isActive = s.activeUser?.id === id;
+        return {
+          profiles: s.profiles.filter((p) => p.id !== id),
+          projects: s.projects.filter((pr) => pr.profileId !== id),
+          activeUser: isActive ? null : s.activeUser,
+          screen: isActive ? "select-profile" : s.screen,
+        };
+      });
+    }
+  },
+
+  createProject: async (p) => {
+    const res = await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(p),
+    });
+    if (res.ok) {
+      const saved = await res.json();
+      set((s) => ({ projects: [...s.projects, saved] }));
+    }
+  },
+
+  updateProject: async (id, patch) => {
+    const res = await fetch(`/api/projects/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      set((s) => ({
+        projects: s.projects.map((pr) => (pr.id === id ? updated : pr)),
+        selectedProject: s.selectedProject?.id === id ? updated : s.selectedProject,
+      }));
+    }
+  },
+
+  deleteProject: async (id) => {
+    const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      set((s) => ({
+        projects: s.projects.filter((pr) => pr.id !== id),
+        selectedProject: s.selectedProject?.id === id ? null : s.selectedProject,
+        screen: s.selectedProject?.id === id ? "home" : s.screen,
+      }));
+    }
+  },
 }));

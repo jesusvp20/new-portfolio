@@ -1,6 +1,6 @@
+import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase-server";
 import type { Profile } from "@/types";
-import { profile as seedProfile } from "@/data/profile";
 
 function mapProfileRow(row: Record<string, unknown>): Profile {
   return {
@@ -48,17 +48,33 @@ function toProfileRow(p: Partial<Profile>): Record<string, unknown> {
   return row;
 }
 
-export async function getProfile(): Promise<Profile> {
-  const { data, error } = await supabase.from("profiles").select("*").single();
-  if (error || !data) return { ...seedProfile } as Profile;
-  return mapProfileRow(data);
+export async function GET() {
+  const { data, error } = await supabase.from("profiles").select("*");
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data.map(mapProfileRow));
 }
 
-export async function updateProfile(input: Partial<Profile>): Promise<Profile> {
-  const current = await getProfile();
-  const next: Profile = { ...current, ...input };
-  const row = toProfileRow(next);
-  const { error } = await supabase.from("profiles").upsert(row);
-  if (error) throw error;
-  return next;
+export async function POST(request: Request) {
+  const body = await request.json();
+  const row = toProfileRow(body);
+  const { data, error } = await supabase.from("profiles").insert(row).select().single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(mapProfileRow(data), { status: 201 });
+}
+
+export async function PUT(request: Request) {
+  const body = await request.json();
+  const { id, ...rest } = body;
+  const row = toProfileRow(rest);
+  const { data, error } = await supabase.from("profiles").update(row).eq("id", id).select().single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(mapProfileRow(data));
+}
+
+export async function DELETE(request: Request) {
+  const body = await request.json();
+  const { id } = body;
+  const { error } = await supabase.from("profiles").delete().eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
 }
