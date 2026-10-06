@@ -49,9 +49,14 @@ function toProfileRow(p: Partial<Profile>): Record<string, unknown> {
 }
 
 export async function GET() {
-  const { data, error } = await supabase.from("profiles").select("*");
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data.map(mapProfileRow));
+  try {
+    const { data, error } = await supabase.from("profiles").select("*");
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!data) return NextResponse.json([]);
+    return NextResponse.json(data.map(mapProfileRow));
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
