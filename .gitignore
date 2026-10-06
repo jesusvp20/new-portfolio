@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# audios locales (se suben a drive/youtube)
+/ps5-sounds
+
+# datos dinámicos del servidor
+/.data
